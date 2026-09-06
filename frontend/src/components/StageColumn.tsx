@@ -40,11 +40,19 @@ const StageColumn: React.FC<Props> = ({
         onDropCandidate(step.id);
     };
 
+    // dragleave también se dispara al pasar por encima de los hijos de la columna. Sin esta
+    // comprobación el resaltado parpadea mientras se arrastra dentro de la propia columna.
+    const handleDragLeave = (event: React.DragEvent<HTMLElement>) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+        setIsOver(false);
+    };
+
     return (
         <section
             className={`kanban-column${isOver ? ' is-drop-target' : ''}`}
             onDragOver={handleDragOver}
-            onDragLeave={() => setIsOver(false)}
+            onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             aria-labelledby={`stage-heading-${step.id}`}
         >

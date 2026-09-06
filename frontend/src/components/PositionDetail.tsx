@@ -94,8 +94,14 @@ const PositionDetail: React.FC = () => {
                 </Alert>
             )}
 
-            {!loading && !loadError && (
-                <div className="kanban-board" aria-label={texts.positionDetail.board}>
+            {!loading && !loadError && steps.length === 0 && (
+                <Alert variant="info">{texts.positionDetail.noSteps}</Alert>
+            )}
+
+            {!loading && !loadError && steps.length > 0 && (
+                // role="group": un aria-label sobre un div sin rol no lo expone la mayoría
+                // de tecnologías de apoyo.
+                <div className="kanban-board" role="group" aria-label={texts.positionDetail.board}>
                     {steps.map(step => (
                         <StageColumn
                             key={step.id}

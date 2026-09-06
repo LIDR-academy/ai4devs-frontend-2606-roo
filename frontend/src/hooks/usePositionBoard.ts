@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     BoardCandidate,
     Candidate,
@@ -60,6 +60,10 @@ export const usePositionBoard = (positionId?: string): PositionBoard => {
     const [moveError, setMoveError] = useState<string | null>(null);
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
     const [reloadToken, setReloadToken] = useState(0);
+    // Identifica el último movimiento pedido para cada aplicación, para descartar respuestas
+    // tardías de peticiones que ya han quedado obsoletas.
+    const latestMoveByApplication = useRef(new Map<number, number>());
+    const nextMoveId = useRef(0);
 
     useEffect(() => {
         if (!positionId) {
@@ -111,18 +115,28 @@ export const usePositionBoard = (positionId?: string): PositionBoard => {
             const targetStep = steps.find(step => step.id === targetStepId);
             if (!targetStep) return;
 
+            // Si se mueve la misma tarjeta dos veces seguidas, la respuesta de la primera
+            // petición no debe pisar el resultado de la segunda: solo actúa la más reciente.
+            const moveId = nextMoveId.current++;
+            latestMoveByApplication.current.set(candidate.applicationId, moveId);
+            const isLatestMove = () =>
+                latestMoveByApplication.current.get(candidate.applicationId) === moveId;
+
             setMoveError(null);
             setStatusMessage(null);
             setCandidateStep(candidate.applicationId, targetStepId);
 
-            updateCandidateStage(candidate.id, candidate.applicationId, targetStepId)
-                .then(() => {
+            updateCandidateStage(candidate.id, candidate.applicationId, targetStepId).then(
+                () => {
+                    if (!isLatestMove()) return;
                     setStatusMessage(texts.status.moved(candidate.fullName, targetStep.name));
-                })
-                .catch((error: unknown) => {
+                },
+                (error: unknown) => {
+                    if (!isLatestMove()) return;
                     setCandidateStep(candidate.applicationId, originStepId);
                     setMoveError(texts.status.moveFailed(candidate.fullName, describeError(error)));
-                });
+                }
+            );
         },
         [setCandidateStep, steps]
     );

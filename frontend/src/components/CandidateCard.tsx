@@ -2,6 +2,7 @@ import React from 'react';
 import { Card, Dropdown } from 'react-bootstrap';
 import { StarFill, Star, ThreeDotsVertical } from 'react-bootstrap-icons';
 import { BoardCandidate, InterviewStep } from '../services/positionService';
+import { formatScore } from '../utils/score';
 import { texts } from '../i18n/texts';
 
 const MAX_SCORE = 5;
@@ -28,6 +29,7 @@ const CandidateCard: React.FC<Props> = ({
     onMove
 }) => {
     const filledStars = Math.max(0, Math.min(MAX_SCORE, Math.round(candidate.averageScore)));
+    const score = formatScore(candidate.averageScore);
 
     const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
         // Necesario para que Firefox inicie el arrastre
@@ -49,11 +51,7 @@ const CandidateCard: React.FC<Props> = ({
                         leer "nombre / estrellas / fase" por separado resulta confuso. */}
                     <p className="kanban-card-name mb-0">
                         <span className="visually-hidden">
-                            {texts.candidateCard.summary(
-                                candidate.fullName,
-                                candidate.averageScore,
-                                currentStep.name
-                            )}
+                            {texts.candidateCard.summary(candidate.fullName, score, currentStep.name)}
                         </span>
                         <span aria-hidden="true">{candidate.fullName}</span>
                     </p>
@@ -86,7 +84,7 @@ const CandidateCard: React.FC<Props> = ({
                 <div
                     className="kanban-score mt-1"
                     aria-hidden="true"
-                    title={texts.candidateCard.scoreLabel(candidate.averageScore)}
+                    title={texts.candidateCard.scoreLabel(score)}
                 >
                     {Array.from({ length: MAX_SCORE }, (_, index) =>
                         index < filledStars ? (
@@ -95,7 +93,7 @@ const CandidateCard: React.FC<Props> = ({
                             <Star key={index} />
                         )
                     )}
-                    <span className="ms-1">{candidate.averageScore}</span>
+                    <span className="ms-1">{score}</span>
                 </div>
             </Card.Body>
         </Card>

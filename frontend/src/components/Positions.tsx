@@ -59,9 +59,9 @@ const Positions: React.FC = () => {
                                     {position.status}
                                 </span>
                                 <div className="d-flex justify-content-between mt-3">
-                                    <Button as={Link as any} to={`/positions/${position.id}`} variant="primary">
+                                    <Link to={`/positions/${position.id}`} className="btn btn-primary">
                                         Ver proceso
-                                    </Button>
+                                    </Link>
                                     <Button variant="secondary">Editar</Button>
                                 </div>
                             </Card.Body>

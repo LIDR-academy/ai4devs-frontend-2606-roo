@@ -16,7 +16,8 @@ export const texts = {
         missingPositionId: 'No se ha indicado ninguna posición',
         board: 'Fases del proceso de contratación',
         dragHint:
-            'Arrastra una tarjeta a otra columna para cambiar de fase, o usa el menú de cada candidato.'
+            'Arrastra una tarjeta a otra columna para cambiar de fase, o usa el menú de cada candidato.',
+        noSteps: 'Esta posición no tiene fases definidas en su proceso de contratación.'
     },
     stageColumn: {
         label: (stepName: string) => `Fase ${stepName}`,
@@ -27,9 +28,9 @@ export const texts = {
     candidateCard: {
         moveMenuHeader: 'Mover a',
         moveMenuLabel: (fullName: string) => `Mover a ${fullName} de fase`,
-        summary: (fullName: string, score: number, stepName: string) =>
+        summary: (fullName: string, score: string, stepName: string) =>
             `${fullName}, puntuación media ${score} sobre 5, fase ${stepName}`,
-        scoreLabel: (score: number) => `Puntuación media: ${score} sobre 5`
+        scoreLabel: (score: string) => `Puntuación media: ${score} sobre 5`
     },
     status: {
         moved: (fullName: string, stepName: string) => `${fullName} movido a ${stepName}`,
