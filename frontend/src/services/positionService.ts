@@ -11,6 +11,12 @@
  *   GET  /position/:id/candidates
  *   PUT  /candidates/:id
  * Se usan las rutas reales para que la integración funcione contra el backend incluido.
+ *
+ * Nota sobre seguridad: la respuesta del backend se valida en tiempo de ejecución antes
+ * de entrar en el estado de React. No se usa Zod/Valibot para no añadir una dependencia
+ * a un contrato tan pequeño, pero el principio es el mismo: no confiar en la forma de
+ * los datos que llegan por la red. Aquí no se maneja ningún secreto: REACT_APP_API_URL
+ * acaba en el bundle y solo contiene la URL pública del backend.
  */
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3010';
@@ -48,41 +54,96 @@ export interface Candidate {
 /** Candidato con la fase ya resuelta a id de columna, tal y como lo usa el tablero. */
 export type BoardCandidate = Candidate & { stepId: number };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
+
+const toNumber = (value: unknown, fallback = 0): number =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+const toText = (value: unknown, fallback = ''): string =>
+    typeof value === 'string' ? value : fallback;
+
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
     const response = await fetch(url, options);
 
     if (!response.ok) {
         let message = `Error ${response.status}`;
         try {
-            const body = await response.json();
-            message = body.message || body.error || message;
+            const body: unknown = await response.json();
+            if (isRecord(body)) {
+                message = toText(body.message, toText(body.error, message));
+            }
         } catch {
             // La respuesta no era JSON: nos quedamos con el mensaje genérico
         }
         throw new Error(message);
     }
 
-    return response.json() as Promise<T>;
+    return (await response.json()) as T;
 };
 
+/** Descarta las fases sin los campos mínimos (id y nombre) en lugar de propagar basura al estado. */
+const parseInterviewStep = (raw: unknown): InterviewStep | null => {
+    if (!isRecord(raw) || typeof raw.id !== 'number' || typeof raw.name !== 'string') {
+        return null;
+    }
+
+    return {
+        id: raw.id,
+        interviewFlowId: toNumber(raw.interviewFlowId),
+        interviewTypeId: toNumber(raw.interviewTypeId),
+        name: raw.name,
+        orderIndex: toNumber(raw.orderIndex)
+    };
+};
+
+/** Descarta los candidatos sin los identificadores necesarios para poder actualizarlos después. */
+const parseCandidate = (raw: unknown): Candidate | null => {
+    if (!isRecord(raw) || typeof raw.id !== 'number' || typeof raw.applicationId !== 'number') {
+        return null;
+    }
+
+    return {
+        id: raw.id,
+        applicationId: raw.applicationId,
+        fullName: toText(raw.fullName),
+        currentInterviewStep: toText(raw.currentInterviewStep),
+        averageScore: toNumber(raw.averageScore)
+    };
+};
+
+const isNotNull = <T>(value: T | null): value is T => value !== null;
+
 /**
- * Devuelve el nombre de la posición y las fases de su proceso de entrevistas.
- * El controller envuelve la respuesta del servicio en `{ interviewFlow }`, lo que
- * produce un doble anidado; se normaliza aquí para aislar al componente.
+ * El controller envuelve la respuesta del servicio en `{ interviewFlow }`, lo que produce
+ * un doble anidado. Se acepta tanto esa forma como la plana del enunciado, por si el
+ * backend se corrige más adelante.
  */
+const unwrapInterviewFlow = (data: unknown): Record<string, unknown> => {
+    if (!isRecord(data)) return {};
+
+    const inner = data.interviewFlow;
+    return isRecord(inner) && 'positionName' in inner ? inner : data;
+};
+
+/** Devuelve el nombre de la posición y las fases de su proceso de entrevistas. */
 export const getInterviewFlowByPosition = async (
     positionId: string | number
 ): Promise<PositionInterviewFlow> => {
-    const data = await request<any>(`${API_BASE_URL}/position/${positionId}/interviewflow`);
+    const data = await request<unknown>(
+        `${API_BASE_URL}/position/${encodeURIComponent(positionId)}/interviewflow`
+    );
 
-    const payload = data?.interviewFlow?.interviewFlow ? data.interviewFlow : data;
+    const payload = unwrapInterviewFlow(data);
+    const flow = isRecord(payload.interviewFlow) ? payload.interviewFlow : {};
+    const rawSteps = Array.isArray(flow.interviewSteps) ? flow.interviewSteps : [];
 
     return {
-        positionName: payload?.positionName ?? '',
+        positionName: toText(payload.positionName),
         interviewFlow: {
-            id: payload?.interviewFlow?.id,
-            description: payload?.interviewFlow?.description ?? '',
-            interviewSteps: payload?.interviewFlow?.interviewSteps ?? []
+            id: toNumber(flow.id),
+            description: toText(flow.description),
+            interviewSteps: rawSteps.map(parseInterviewStep).filter(isNotNull)
         }
     };
 };
@@ -91,8 +152,11 @@ export const getInterviewFlowByPosition = async (
 export const getCandidatesByPosition = async (
     positionId: string | number
 ): Promise<Candidate[]> => {
-    const data = await request<Candidate[]>(`${API_BASE_URL}/position/${positionId}/candidates`);
-    return Array.isArray(data) ? data : [];
+    const data = await request<unknown>(
+        `${API_BASE_URL}/position/${encodeURIComponent(positionId)}/candidates`
+    );
+
+    return Array.isArray(data) ? data.map(parseCandidate).filter(isNotNull) : [];
 };
 
 /** Mueve un candidato a otra fase del proceso. */
@@ -100,8 +164,8 @@ export const updateCandidateStage = async (
     candidateId: number,
     applicationId: number,
     interviewStepId: number
-): Promise<any> =>
-    request(`${API_BASE_URL}/candidates/${candidateId}`, {
+): Promise<void> => {
+    await request<unknown>(`${API_BASE_URL}/candidates/${candidateId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -109,3 +173,4 @@ export const updateCandidateStage = async (
             currentInterviewStep: String(interviewStepId)
         })
     });
+};

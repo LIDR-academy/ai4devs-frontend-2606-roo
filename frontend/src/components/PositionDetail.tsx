@@ -1,171 +1,110 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Button, Container, Spinner } from 'react-bootstrap';
 import { ArrowLeft } from 'react-bootstrap-icons';
 import { Link, useParams } from 'react-router-dom';
 import StageColumn from './StageColumn';
-import {
-    BoardCandidate,
-    Candidate,
-    InterviewStep,
-    getCandidatesByPosition,
-    getInterviewFlowByPosition,
-    updateCandidateStage
-} from '../services/positionService';
+import { usePositionBoard } from '../hooks/usePositionBoard';
+import { BoardCandidate } from '../services/positionService';
+import { texts } from '../i18n/texts';
 import './PositionDetail.css';
 
-const sortSteps = (steps: InterviewStep[]): InterviewStep[] =>
-    [...steps].sort((a, b) => a.orderIndex - b.orderIndex);
-
 /**
- * El endpoint de candidatos devuelve la fase por nombre, mientras que las columnas
- * y el PUT trabajan con el id de la fase. Aquí se resuelve el nombre a id; si no
- * hay coincidencia, el candidato cae en la primera fase del proceso.
+ * Vista de detalle de una posición: tablero kanban con una columna por fase del
+ * proceso de contratación. La carga y el movimiento de candidatos viven en
+ * `usePositionBoard`; aquí solo queda la presentación y el estado del arrastre.
  */
-const toBoardCandidates = (candidates: Candidate[], steps: InterviewStep[]): BoardCandidate[] => {
-    const stepIdByName = new Map(steps.map(step => [step.name, step.id]));
-    const fallbackStepId = steps[0]?.id;
-
-    return candidates.map(candidate => ({
-        ...candidate,
-        stepId: stepIdByName.get(candidate.currentInterviewStep) ?? fallbackStepId
-    }));
-};
-
 const PositionDetail: React.FC = () => {
     const { id } = useParams<{ id: string }>();
+    const {
+        positionName,
+        steps,
+        candidates,
+        loading,
+        loadError,
+        statusMessage,
+        moveError,
+        reload,
+        moveCandidate,
+        dismissMoveError
+    } = usePositionBoard(id);
 
-    const [positionName, setPositionName] = useState('');
-    const [steps, setSteps] = useState<InterviewStep[]>([]);
-    const [candidates, setCandidates] = useState<BoardCandidate[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [loadError, setLoadError] = useState<string | null>(null);
-    const [updateError, setUpdateError] = useState<string | null>(null);
     const [draggingCandidate, setDraggingCandidate] = useState<BoardCandidate | null>(null);
 
-    const loadPosition = useCallback(async () => {
-        if (!id) return;
-
-        setLoading(true);
-        setLoadError(null);
-
-        try {
-            const [flow, candidateList] = await Promise.all([
-                getInterviewFlowByPosition(id),
-                getCandidatesByPosition(id)
-            ]);
-
-            const orderedSteps = sortSteps(flow.interviewFlow.interviewSteps);
-            setPositionName(flow.positionName);
-            setSteps(orderedSteps);
-            setCandidates(toBoardCandidates(candidateList, orderedSteps));
-        } catch (error) {
-            setLoadError(error instanceof Error ? error.message : 'Error cargando la posición');
-        } finally {
-            setLoading(false);
-        }
-    }, [id]);
-
-    useEffect(() => {
-        loadPosition();
-    }, [loadPosition]);
-
-    /** Mueve la tarjeta de forma optimista y revierte si el backend falla. */
-    const moveCandidate = useCallback(
-        async (candidate: BoardCandidate, targetStepId: number) => {
-            const originStepId = candidate.stepId;
-            if (originStepId === targetStepId) return;
-
-            setUpdateError(null);
-            setCandidates(current =>
-                current.map(item =>
-                    item.applicationId === candidate.applicationId
-                        ? { ...item, stepId: targetStepId }
-                        : item
-                )
-            );
-
-            try {
-                await updateCandidateStage(candidate.id, candidate.applicationId, targetStepId);
-            } catch (error) {
-                setCandidates(current =>
-                    current.map(item =>
-                        item.applicationId === candidate.applicationId
-                            ? { ...item, stepId: originStepId }
-                            : item
-                    )
-                );
-                setUpdateError(
-                    `No se pudo mover a ${candidate.fullName}: ${
-                        error instanceof Error ? error.message : 'error desconocido'
-                    }`
-                );
-            }
-        },
-        []
-    );
-
-    const handleDrop = useCallback(
-        (targetStepId: number) => {
-            if (draggingCandidate) {
-                moveCandidate(draggingCandidate, targetStepId);
-            }
-            setDraggingCandidate(null);
-        },
-        [draggingCandidate, moveCandidate]
-    );
+    // Un solo recorrido para agrupar, en lugar de un filter por columna en cada render
+    const candidatesByStep = useMemo(() => {
+        const grouped = new Map<number, BoardCandidate[]>(steps.map(step => [step.id, []]));
+        candidates.forEach(candidate => grouped.get(candidate.stepId)?.push(candidate));
+        return grouped;
+    }, [candidates, steps]);
 
     const handleDragStart = useCallback(
         (candidate: BoardCandidate) => setDraggingCandidate(candidate),
         []
     );
 
+    const handleDragEnd = useCallback(() => setDraggingCandidate(null), []);
+
+    const handleDrop = useCallback(
+        (targetStepId: number) => {
+            if (draggingCandidate) moveCandidate(draggingCandidate, targetStepId);
+            setDraggingCandidate(null);
+        },
+        [draggingCandidate, moveCandidate]
+    );
+
     return (
-        <Container className="mt-4 mb-5">
-            <div className="d-flex align-items-center gap-2 mb-4">
+        <Container as="main" className="mt-4 mb-5">
+            <div className="d-flex align-items-center gap-2 mb-2">
                 <Link
                     to="/positions"
-                    className="btn btn-link text-decoration-none p-0 text-secondary"
-                    aria-label="Volver al listado de posiciones"
+                    className="kanban-back-link"
+                    aria-label={texts.positionDetail.backToList}
                 >
-                    <ArrowLeft size={28} />
+                    <ArrowLeft size={24} aria-hidden="true" />
                 </Link>
-                <h2 className="mb-0">{positionName || 'Posición'}</h2>
+                <h2 className="mb-0">{positionName || texts.positionDetail.fallbackTitle}</h2>
+            </div>
+            <p className="kanban-hint">{texts.positionDetail.dragHint}</p>
+
+            {/* Región de estado: anuncia los movimientos a lectores de pantalla sin robar el foco */}
+            <div aria-live="polite" className="visually-hidden">
+                {statusMessage}
             </div>
 
-            {updateError && (
-                <Alert variant="warning" dismissible onClose={() => setUpdateError(null)}>
-                    {updateError}
+            {moveError && (
+                <Alert variant="warning" dismissible onClose={dismissMoveError} role="alert">
+                    {moveError}
                 </Alert>
             )}
 
             {loading && (
-                <div className="text-center py-5">
+                <div className="text-center py-5" aria-busy="true">
                     <Spinner animation="border" role="status">
-                        <span className="visually-hidden">Cargando…</span>
+                        <span className="visually-hidden">{texts.positionDetail.loading}</span>
                     </Spinner>
                 </div>
             )}
 
             {!loading && loadError && (
-                <Alert variant="danger">
+                <Alert variant="danger" role="alert">
                     <p className="mb-2">{loadError}</p>
-                    <Button variant="outline-danger" size="sm" onClick={loadPosition}>
-                        Reintentar
+                    <Button variant="outline-danger" size="sm" onClick={reload}>
+                        {texts.positionDetail.retry}
                     </Button>
                 </Alert>
             )}
 
             {!loading && !loadError && (
-                <div className="kanban-board">
+                <div className="kanban-board" aria-label={texts.positionDetail.board}>
                     {steps.map(step => (
                         <StageColumn
                             key={step.id}
                             step={step}
                             steps={steps}
-                            candidates={candidates.filter(candidate => candidate.stepId === step.id)}
+                            candidates={candidatesByStep.get(step.id) ?? []}
                             draggingApplicationId={draggingCandidate?.applicationId ?? null}
                             onDragStart={handleDragStart}
-                            onDragEnd={() => setDraggingCandidate(null)}
+                            onDragEnd={handleDragEnd}
                             onDropCandidate={handleDrop}
                             onMove={moveCandidate}
                         />
